@@ -11,15 +11,16 @@ require(labdsv)
 require(xtable)
 library(foreach)
 library(doMC)
+library(rhandsontable)
 
 # Set the file size limit for uploads here in megabytes
 iMegabytes <- 500
 options(shiny.maxRequestSize = iMegabytes*1024^2)
 
-iCores <- 10
-iRepsPerCore <- 10
+iCores <- 2
+iRepsPerCore <- 2
 
-registerDoMC(10)  # the number of CPU cores
+registerDoMC(2)  # the number of CPU cores
 
 Logged = FALSE;
 load(file=paste0(sShinyPath,"/passwd.Rdata"))
@@ -35,6 +36,8 @@ shinyServer(function(input, output, session) {
 
   system(paste0("touch ",sAppDir,"/restart.txt"))
   source(paste0(sAppDir,"/www/Login.R"),  local = TRUE)
+  values = list()
+  setHot = function(x) values[["hot"]] <<- x  
 
   observe({
     if (USER$Logged == TRUE)
@@ -44,14 +47,15 @@ shinyServer(function(input, output, session) {
           sidebarPanel(
               textOutput("usermessage"),
               selectInput("userinterface", "Choose User Interface:",
-                          choices = c("Upload","Run Marxan","Parameter Testing","Download")),
+                          choices = c("Upload","Edit species","Run Marxan","Parameter Testing","Download")),
               conditionalPanel(condition = "input.userinterface == 'Upload'",
                   fileInput('file1', 'Choose file to upload',accept = c('.zip')),
                   textInput("uploadname","Database Name:",value=""),
                   actionButton("acceptupload","Accept Database"),
                   textOutput("feedbackupload")
               ),
-              conditionalPanel(condition = "(input.userinterface == 'Run Marxan') || (input.userinterface == 'Parameter Testing')",
+              conditionalPanel(condition = "(input.userinterface == 'Edit Species') || (input.userinterface == 'Run Marxan') 
+                                      || (input.userinterface == 'Parameter Testing')",
                   selectInput("database","Database:",
                               choices = c(list.dirs(sUserHome)),
                               selected = sSelectDb),
@@ -60,6 +64,11 @@ shinyServer(function(input, output, session) {
               conditionalPanel(condition = "input.userinterface == 'Download'",
                   HTML("Download")
               ),
+              conditionalPanel(condition = "input.userinterface == 'Edit species'",
+                               br(),
+                               actionButton("saveBtn", "Save")
+              ),
+              
               conditionalPanel(condition = "input.userinterface == 'Run Marxan'",
                   br(),
                   actionButton("mrun","Run"),
@@ -101,6 +110,9 @@ shinyServer(function(input, output, session) {
               conditionalPanel(condition = "input.userinterface == 'Upload'",
                    tableOutput('contents')
               ),
+              conditionalPanel(condition = "input.userinterface == 'Edit species'",
+                               rHandsontableOutput("hot")
+              ),
               conditionalPanel(condition = "input.userinterface == 'Run Marxan'",
                    plotOutput("marxanplot")
               )
@@ -108,6 +120,45 @@ shinyServer(function(input, output, session) {
         })
     } # if
   }) # observe
+  
+  observe({
+    if (USER$Logged == TRUE)
+    {    
+      input$saveBtn
+      
+      if (!is.null(values[["hot"]])) {
+        write.csv(values[["hot"]], paste0(sMarxanDir,"/input/spec.dat"), row.names=F)
+        #print(fname)
+      }
+    }
+  })
+  
+  output$hot = renderRHandsontable({
+    if (USER$Logged == TRUE)
+    {    
+      if (!is.null(input$hot)) {
+        DF = hot_to_r(input$hot)
+      } else {
+        DF = read.csv(paste0(sMarxanDir,"/input/spec.dat"),stringsAsFactors=FALSE)
+        DF$spf <- as.numeric(DF$spf)
+      }
+    
+      setHot(DF)
+      rhandsontable(DF, readOnly = T) %>%
+      hot_table(highlightCol = TRUE, highlightRow = TRUE) %>%
+      hot_col(c("prop","spf"), readOnly = FALSE) %>%
+      #        hot_validate_numeric(col = 2, min = 0, max = 1.0) #%>%
+      hot_cols(renderer = "
+         function (instance, td, row, col, prop, value, cellProperties) {
+           Handsontable.renderers.TextRenderer.apply(this, arguments);
+           if (col == 1 && (value > 1.0 || value < 0.0)) {
+            td.style.background = 'red';
+           }
+         }")
+    }
+  })
+  
+  
   observe({
     if (USER$Logged == TRUE)
     {
